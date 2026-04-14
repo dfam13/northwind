@@ -1,0 +1,77 @@
+name: Smart Terraform Pipeline
+
+on:
+  push:
+    paths:
+      - '**'
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      payment: ${{ steps.filter.outputs.payment }}
+      user: ${{ steps.filter.outputs.user }}
+      global: ${{ steps.filter.outputs.global }}
+      changelog: ${{ steps.filter.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            payment:
+              - 'apps/payment-api/**'
+            user:
+              - 'apps/user-api/**'
+            global:
+              - 'global/**'
+            changelog:
+              - 'CHANGELOG.md'
+
+  plan:
+    needs: detect
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        app: [payment-api, user-api]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if only changelog
+        if: needs.detect.outputs.changelog == 'true' && needs.detect.outputs.payment != 'true' && needs.detect.outputs.user != 'true' && needs.detect.outputs.global != 'true'
+        run: |
+          echo "Only CHANGELOG.md changed. Exiting."
+          exit 0
+
+      - name: Decide execution
+        id: runcheck
+        run: |
+          RUN=false
+
+          if [[ "${{ needs.detect.outputs.global }}" == "true" ]]; then
+            RUN=true
+          elif [[ "${{ matrix.app }}" == "payment-api" && "${{ needs.detect.outputs.payment }}" == "true" ]]; then
+            RUN=true
+          elif [[ "${{ matrix.app }}" == "user-api" && "${{ needs.detect.outputs.user }}" == "true" ]]; then
+            RUN=true
+          fi
+
+          echo "run=$RUN" >> $GITHUB_OUTPUT
+
+      - name: Terraform Plan
+        if: steps.runcheck.outputs.run == 'true'
+        run: |
+          cd apps/${{ matrix.app }}
+          terraform init
+          terraform plan -no-color > plan.txt
+
+      - name: Step Summary
+        if: steps.runcheck.outputs.run == 'true'
+        run: |
+          echo "## Terraform Plan: ${{ matrix.app }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat apps/${{ matrix.app }}/plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
