@@ -2,3 +2,6 @@
 *.tfstate
 *.tfstate.backup
 crash.log
+env/dev/.terraform/
+*.tfstate
+*.tfstate.backup
